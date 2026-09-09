@@ -1,0 +1,3 @@
+import { FoundationGate, PageHeading } from "@/components/layout/app-shell";
+export const metadata = { title: "Account settings" };
+export default function SettingsPage() { return <><PageHeading eyebrow="ACCOUNT & PREFERENCES" title="Your space. Your controls." description="Account security, connected identities and API access." /><FoundationGate phase="AUTHENTICATION · PHASE 2" title="Secure identity comes next" description="Google, Discord and email authentication are planned for Phase 2. No account exists in this foundation workspace, and no keys can be created until authentication and authorization are implemented." /></>; }

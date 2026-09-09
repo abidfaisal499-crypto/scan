@@ -1,0 +1,4 @@
+import { ShieldCheck, LockKeyhole, Globe2, ScanLine, Fingerprint } from "lucide-react";
+export function Radar() {
+  return <div className="radar" aria-hidden="true"><div className="radar-grid" /><div className="radar-ring ring-one" /><div className="radar-ring ring-two" /><div className="radar-ring ring-three" /><div className="radar-cross cross-horizontal" /><div className="radar-cross cross-vertical" /><div className="radar-sweep" /><div className="radar-core"><ShieldCheck size={48} strokeWidth={1.3} /></div><span className="radar-node node-one"><Globe2 size={18} /></span><span className="radar-node node-two"><LockKeyhole size={15} /></span><span className="radar-node node-three"><Fingerprint size={17} /></span><span className="radar-node node-four"><ScanLine size={15} /></span><i className="radar-dot dot-one" /><i className="radar-dot dot-two" /><div className="radar-caption"><span /> MULTI-LAYER INTELLIGENCE</div></div>;
+}
