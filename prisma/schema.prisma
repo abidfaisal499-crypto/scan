@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+enum Plan {
+  FREE
+  PRO
+}
+enum ScanStatus {
+  QUEUED
+  SCANNING
+  ANALYZING
+  AGGREGATING
+  COMPLETED
+  FAILED
+}
+enum ScanKind {
+  URL
+  DOMAIN
+  IP
+  FILE
+  HASH
+  EMAIL
+}
+enum RiskLevel {
+  SAFE
+  LOW_RISK
+  SUSPICIOUS
+  HIGH_RISK
+  MALICIOUS
+}
+enum ProviderStatus {
+  COMPLETED
+  DISABLED
+  UNAVAILABLE
+  TIMEOUT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(USER)
+  plan          Plan      @default(FREE)
+  bannedAt      DateTime?
+  preferences   Json      @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  scans         Scan[]
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+  @@index([createdAt])
+  @@index([role, bannedAt])
+}
+
+// Standard NextAuth adapter shape. Token encryption policy is a Phase 2 gate.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expires])
+}
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+  @@index([expires])
+}
+
+model Scan {
+  id            String      @id @default(cuid())
+  kind          ScanKind    @default(URL)
+  userId        String?
+  apiKeyId      String?
+  domainId      String?
+  // Encrypt sensitive URL fields before enabling persistence in Phase 3.
+  normalizedUrl String      @db.Text
+  urlHash       String      @db.Char(64)
+  status        ScanStatus  @default(QUEUED)
+  progress      Int         @default(0)
+  stage         String?
+  isPrivate     Boolean     @default(true)
+  cachedFromId  String?
+  failureCode   String?
+  createdAt     DateTime    @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  expiresAt     DateTime?
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey        ApiKey?     @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  domain        Domain?     @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  result        ScanResult?
+  cachedFrom    Scan?       @relation("CachedScans", fields: [cachedFromId], references: [id], onDelete: SetNull)
+  cachedCopies  Scan[]      @relation("CachedScans")
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([urlHash, completedAt(sort: Desc)])
+  @@index([domainId])
+  @@index([apiKeyId])
+  @@index([cachedFromId])
+  @@index([status, createdAt])
+  @@index([expiresAt])
+}
+model ScanResult {
+  id                String      @id @default(cuid())
+  scanId            String      @unique
+  // Null score means insufficient evidence, never "SAFE" by default.
+  riskScore         Int?
+  riskLevel         RiskLevel?
+  evidenceCoverage  Float       @default(0)
+  engineVersion     String
+  weightsSnapshot   Json
+  findings          Json        @default("[]")
+  redirectChain     Json        @default("[]")
+  tls               Json?
+  dns               Json?
+  analyzedAt        DateTime    @default(now())
+  scan              Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  detections        ThreatDetection[]
+  @@index([riskLevel, analyzedAt])
+  @@index([riskScore])
+}
+model Domain {
+  id                String    @id @default(cuid())
+  hostname          String    @unique
+  registrableDomain String?
+  tld               String?
+  registrar         String?
+  registeredAt      DateTime?
+  registryUpdatedAt DateTime?
+  expiresAt         DateTime?
+  nameservers       String[]
+  // Only normalized non-personal registration metadata, no raw WHOIS PII.
+  registration      Json?
+  dnsRecords        Json?
+  lastAnalyzedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  scans             Scan[]
+  addresses         IPAddress[]
+  @@index([registrableDomain])
+  @@index([lastAnalyzedAt])
+}
+model IPAddress {
+  id             String   @id @default(cuid())
+  address        String   @unique @db.Inet
+  asn            Int?
+  organization   String?
+  countryCode    String?  @db.Char(2)
+  reputation     Json?
+  lastAnalyzedAt DateTime?
+  createdAt      DateTime @default(now())
+  domains        Domain[]
+  @@index([asn])
+}
+model Provider {
+  id          String   @id
+  name        String
+  enabled     Boolean  @default(false)
+  timeoutMs   Int      @default(10000)
+  // Never store API keys here. Configuration contains non-secret policy only.
+  config      Json     @default("{}")
+  updatedAt   DateTime @updatedAt
+  detections  ThreatDetection[]
+}
+model ThreatDetection {
+  id           String         @id @default(cuid())
+  resultId     String
+  providerId   String
+  status       ProviderStatus
+  detected     Boolean?
+  score        Float?
+  confidence   Float?
+  categories   String[]
+  details      Json            @default("{}")
+  errorCode    String?
+  checkedAt    DateTime        @default(now())
+  result       ScanResult      @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  provider     Provider        @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  @@unique([resultId, providerId])
+  @@index([providerId, checkedAt])
+  @@index([detected, checkedAt])
+}
+model ApiKey {
+  id              String    @id @default(cuid())
+  userId          String
+  name            String
+  prefix          String
+  keyHash         String    @unique @db.Char(64)
+  scopes          String[]
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  lastUsedAt      DateTime?
+  dailyLimit      Int       @default(50)
+  rateLimitMinute Int       @default(10)
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usage           ApiUsage[]
+  scans           Scan[]
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+model ApiUsage {
+  id         String   @id @default(cuid())
+  apiKeyId   String
+  route      String
+  method     String
+  statusCode Int
+  durationMs Int
+  requestId  String
+  createdAt  DateTime @default(now())
+  apiKey     ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  @@index([apiKeyId, createdAt])
+  @@index([createdAt])
+  @@index([requestId])
+}
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  requestId  String?
+  // Allowlisted fields only; never URLs, credentials, tokens or request bodies.
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
+}
+model SystemConfig {
+  key       String   @id
+  value     Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
